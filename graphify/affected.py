@@ -37,6 +37,18 @@ DEFAULT_AFFECTED_RELATIONS = (
     # its defining file and then continues through `imports` to consumers.
     "defines",
     "requires",
+    # Cross-layer edges from graphify.stacklink (dependent -> dependency):
+    # endpoint -> handler, client fn -> endpoint, handler -> DTO, DTO mirror,
+    # entity -> table, repository -> entity, queue -> publisher, consumer -> queue.
+    "handled_by",
+    "calls_endpoint",
+    "uses_dto",
+    "mirrors",
+    "maps_to",
+    "repository_of",
+    "fed_by",
+    "consumes",
+    "renders",
 )
 
 

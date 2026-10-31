@@ -153,6 +153,17 @@ def _graph_root_for(gp: Path) -> Path:
     return gp.parent.parent if gp.parent.name == GRAPHIFY_OUT_NAME else gp.parent
 
 
+def _print_stack_link_stats(stats: dict, graph_path) -> None:
+    print(f"stack-link: wrote {graph_path} (+{stats['nodes_added']} nodes)")
+    for rel_name, n in stats["relations"].items():
+        print(f"  {rel_name}: {n}")
+    calls, matched = stats.get("client_calls", {}), stats.get("client_matched", {})
+    for kind in ("ts", "dart"):
+        if calls.get(kind):
+            print(f"  {kind} client calls matched: {matched.get(kind, 0)}/{calls[kind]} "
+                  f"({100 * matched.get(kind, 0) / calls[kind]:.0f}%)")
+
+
 def _default_graph_path() -> str:
     return str(Path(_GRAPHIFY_OUT) / "graph.json")
 
@@ -1731,6 +1742,38 @@ def dispatch_command(cmd: str) -> None:
             sys.exit(EXIT_AMBIGUOUS)
         if _result == _QUERY_NO_MATCH or _result.startswith("No unique node match for --seed:"):
             sys.exit(EXIT_NOT_FOUND)
+    elif cmd in ("stack-link", "stack_link"):
+        # Cross-layer linker (Spring endpoints <-> Next/Flutter clients, JPA <-> Flyway
+        # schema, RabbitMQ queues). Source/SQL files only; never touches a database.
+        graph_path = _default_graph_path()
+        root_arg: str | None = None
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--graph" and i + 1 < len(args):
+                graph_path = args[i + 1]
+                i += 2
+            elif args[i].startswith("--graph="):
+                graph_path = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] == "--root" and i + 1 < len(args):
+                root_arg = args[i + 1]
+                i += 2
+            elif args[i].startswith("--root="):
+                root_arg = args[i].split("=", 1)[1]
+                i += 1
+            else:
+                print(f"error: unknown stack-link option: {args[i]}", file=sys.stderr)
+                sys.exit(2)
+        gp = Path(graph_path).resolve()
+        if not gp.exists() or gp.suffix != ".json":
+            print(f"error: graph file not found (or not .json): {gp}", file=sys.stderr)
+            sys.exit(1)
+        from graphify.paths import GRAPHIFY_OUT_NAME
+        default_root = gp.parent.parent if gp.parent.name == GRAPHIFY_OUT_NAME else gp.parent
+        root_path = Path(root_arg).resolve() if root_arg else default_root
+        from graphify.stacklink import link_graph_file
+        _print_stack_link_stats(link_graph_file(gp, root_path), gp)
     elif cmd == "affected":
         if len(sys.argv) < 3:
             print("Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
@@ -2852,9 +2895,13 @@ def dispatch_command(cmd: str) -> None:
     elif cmd == "update":
         force = os.environ.get("GRAPHIFY_FORCE", "").lower() in ("1", "true", "yes")
         no_cluster = False
+        stack_link = False
         args = sys.argv[2:]
         watch_arg: str | None = None
         for a in args:
+            if a == "--stack-link":
+                stack_link = True
+                continue
             if a == "--force":
                 force = True
                 continue
@@ -2894,6 +2941,10 @@ def dispatch_command(cmd: str) -> None:
         ok = _rebuild_code(watch_path, force=force, no_cluster=no_cluster, block_on_lock=True)
         if ok:
             print("Code graph updated. For doc/paper/image changes run /graphify --update in your AI assistant.")
+            if stack_link:
+                from graphify.stacklink import link_graph_file
+                _gp = Path(watch_path) / _GRAPHIFY_OUT / "graph.json"
+                _print_stack_link_stats(link_graph_file(_gp, Path(watch_path).resolve()), _gp)
             if not (
                 os.environ.get("GEMINI_API_KEY")
                 or os.environ.get("GOOGLE_API_KEY")
