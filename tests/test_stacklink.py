@@ -172,3 +172,22 @@ def test_file_roundtrip_idempotent(tmp_path):
     hits = {h.node_id for h in affected_nodes(g, "core_src_main_java_a_customercontact_java_customercontact",
                                               relations=DEFAULT_AFFECTED_RELATIONS, depth=3)}
     assert any("repository" in h for h in hits)
+
+
+def test_rebuild_reapplies_stack_link_only_when_marker_present(tmp_path, monkeypatch):
+    import graphify.stacklink as stacklink
+    from graphify import watch
+
+    out = tmp_path / watch._GRAPHIFY_OUT
+    out.mkdir(parents=True)
+    (out / "graph.json").write_text("{}", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(watch, "_rebuild_code_base", lambda p, **kw: True)
+    monkeypatch.setattr(stacklink, "link_graph_file", lambda g, r: calls.append((g, r)) or {})
+
+    assert watch._rebuild_code(tmp_path) is True
+    assert calls == []
+
+    (out / watch.STACK_LINK_MARKER).touch()
+    assert watch._rebuild_code(tmp_path) is True
+    assert calls == [(out / "graph.json", tmp_path.resolve())]

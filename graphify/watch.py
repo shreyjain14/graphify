@@ -3227,6 +3227,26 @@ def watch(watch_path: Path, debounce: float = 3.0) -> None:
         observer.join()
 
 
+# Stack-link opt-in marker: once `graphify stack-link` has run against a graph,
+# every later code rebuild (update, watch, git hooks) re-applies the cross-layer
+# links so they are not silently dropped. The pass is idempotent.
+STACK_LINK_MARKER = ".stacklink"
+
+_rebuild_code_base = _rebuild_code
+
+
+def _rebuild_code(watch_path: Path, **kwargs) -> bool:  # type: ignore[no-redef]
+    ok = _rebuild_code_base(watch_path, **kwargs)
+    out = Path(watch_path) / _GRAPHIFY_OUT
+    if ok and (out / STACK_LINK_MARKER).exists() and (out / "graph.json").exists():
+        try:
+            from graphify.stacklink import link_graph_file
+            link_graph_file(out / "graph.json", Path(watch_path).resolve())
+        except Exception as exc:  # never fail a rebuild because of the linker
+            print(f"[graphify] stack-link skipped: {exc}")
+    return ok
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Watch a folder and auto-update the graphify graph")

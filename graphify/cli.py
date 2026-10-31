@@ -1773,7 +1773,10 @@ def dispatch_command(cmd: str) -> None:
         default_root = gp.parent.parent if gp.parent.name == GRAPHIFY_OUT_NAME else gp.parent
         root_path = Path(root_arg).resolve() if root_arg else default_root
         from graphify.stacklink import link_graph_file
+        from graphify.watch import STACK_LINK_MARKER
         _print_stack_link_stats(link_graph_file(gp, root_path), gp)
+        # Opt this graph in so later rebuilds (update/watch/hooks) keep the links.
+        (gp.parent / STACK_LINK_MARKER).touch()
     elif cmd == "affected":
         if len(sys.argv) < 3:
             print("Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
@@ -2932,8 +2935,11 @@ def dispatch_command(cmd: str) -> None:
         if not watch_path.exists():
             print(f"error: path not found: {watch_path}", file=sys.stderr)
             sys.exit(1)
-        from graphify.watch import _rebuild_code
+        from graphify.watch import STACK_LINK_MARKER, _rebuild_code
 
+        _marker = Path(watch_path) / _GRAPHIFY_OUT / STACK_LINK_MARKER
+        if stack_link and _marker.exists():
+            stack_link = False  # _rebuild_code already re-applies it
         print(f"Re-extracting code files in {watch_path} (no LLM needed)...")
         # Interactive CLI: block on the per-repo lock rather than skip, so the
         # user sees their explicit `graphify update` complete instead of
@@ -2945,6 +2951,7 @@ def dispatch_command(cmd: str) -> None:
                 from graphify.stacklink import link_graph_file
                 _gp = Path(watch_path) / _GRAPHIFY_OUT / "graph.json"
                 _print_stack_link_stats(link_graph_file(_gp, Path(watch_path).resolve()), _gp)
+                _marker.touch()
             if not (
                 os.environ.get("GEMINI_API_KEY")
                 or os.environ.get("GOOGLE_API_KEY")
